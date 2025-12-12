@@ -1,0 +1,24 @@
+{
+  "text_col": "service_content",
+  "datetime_col": "handle_time",
+  "structured_cols": [
+    "tt_status",
+    "dept_initial",
+    "service_request_type",
+    "subs_level",
+    "customer_level",
+    "dept_traitement",
+    "tech_comm",
+    "service_type",
+    "dot",
+    "actel",
+    "actel_code"
+  ],
+  "add_structured_tokens": false,
+  "add_time_tokens": false,
+  "add_text": true,
+  "notes": {
+    "sn_not_used": true,
+    "id_not_used": true
+  }
+}

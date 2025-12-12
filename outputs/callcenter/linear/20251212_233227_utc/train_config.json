@@ -1,0 +1,25 @@
+{
+  "run_id": "20251212_233227_utc",
+  "utc_time": "2025-12-12T23:32:40.230685+00:00",
+  "seed": 42,
+  "folds": 2,
+  "data_dir": "c:\\Users\\LENOVO\\Desktop\\forsa_hack_call\\data\\forsa-2025-call-center",
+  "doc_cfg": {
+    "structured_cols": [
+      "tt_status",
+      "dept_initial",
+      "service_request_type",
+      "subs_level",
+      "customer_level",
+      "dept_traitement",
+      "tech_comm",
+      "service_type",
+      "dot",
+      "actel",
+      "actel_code"
+    ],
+    "add_time_tokens": false,
+    "add_structured_tokens": false,
+    "add_text": true
+  }
+}

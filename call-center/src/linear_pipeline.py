@@ -21,9 +21,9 @@ from typing import Any, Iterable
 import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator
+from sklearn.base import TransformerMixin
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import FunctionTransformer
 from sklearn.utils.class_weight import compute_class_weight
 from sklearn.model_selection import StratifiedKFold
 
@@ -75,6 +75,24 @@ class DocumentConfig:
 
     # Whether to include the cleaned free text at all (normally True)
     add_text: bool = True
+
+
+class DocumentBuilder(BaseEstimator, TransformerMixin):
+    """Convert a cleaned canonical dataframe into a 1D array of document strings.
+
+    Implemented as a top-level class so it can be pickled by joblib in Colab.
+    """
+
+    def __init__(self, cfg: CallCenterConfig, doc_cfg: DocumentConfig):
+        self.cfg = cfg
+        self.doc_cfg = doc_cfg
+
+    def fit(self, X: pd.DataFrame, y: Any = None):  # noqa: N803
+        return self
+
+    def transform(self, X: pd.DataFrame) -> np.ndarray:  # noqa: N803
+        docs = make_document_series(X, self.cfg, self.doc_cfg)
+        return docs.to_numpy(dtype=object)
 
 
 def make_document_series(
@@ -156,11 +174,7 @@ def build_unified_pipeline(
     doc_cfg = doc_cfg or DocumentConfig()
     clf_params = dict(clf_params or {})
 
-    def _to_docs(frame: pd.DataFrame) -> np.ndarray:
-        docs = make_document_series(frame, cfg, doc_cfg)
-        return docs.to_numpy(dtype=object)
-
-    doc_builder = FunctionTransformer(_to_docs, validate=False)
+    doc_builder = DocumentBuilder(cfg=cfg, doc_cfg=doc_cfg)
 
     # Two TF-IDF vectorizers over the same document string.
     word_vec = TfidfVectorizer(
