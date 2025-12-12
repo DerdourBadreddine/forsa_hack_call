@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Jupyter / Colab
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
