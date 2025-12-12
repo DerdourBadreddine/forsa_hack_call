@@ -1,0 +1,8 @@
+# Minimal deps for the final (non-transformer) Call Center solution
+# Install in Colab:
+#   pip install -r requirements-linear.txt
+
+numpy
+pandas
+scikit-learn
+optuna

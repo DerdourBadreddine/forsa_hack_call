@@ -81,6 +81,11 @@ def _load_train(data_dir: Path) -> tuple[pd.DataFrame, np.ndarray]:
     return df_clean, y
 
 
+def _parse_pair(s: str) -> tuple[int, int]:
+    a, b = [x.strip() for x in str(s).split(",", 1)]
+    return int(a), int(b)
+
+
 def main() -> None:
     args = parse_args()
     _set_repro(int(args.seed))
@@ -118,8 +123,9 @@ def main() -> None:
 
     def objective(trial: "optuna.Trial") -> float:
         # ----- Search space -----
-        word_ngram = trial.suggest_categorical("word_ngram", [(1, 1), (1, 2)])
-        char_ngram = trial.suggest_categorical("char_ngram", [(3, 5), (4, 6)])
+        # Use strings to avoid Optuna persistence warnings about tuple types.
+        word_ngram = trial.suggest_categorical("word_ngram", ["1,1", "1,2"])
+        char_ngram = trial.suggest_categorical("char_ngram", ["3,5", "4,6"])
 
         min_df = trial.suggest_int("min_df", 1, 8)
         max_df = trial.suggest_float("max_df", 0.85, 0.98)
@@ -156,8 +162,8 @@ def main() -> None:
         pipe = linear_pipeline.build_unified_pipeline(
             cfg=cfg,
             doc_cfg=doc_cfg,
-            word_ngram_range=word_ngram,
-            char_ngram_range=char_ngram,
+            word_ngram_range=_parse_pair(word_ngram),
+            char_ngram_range=_parse_pair(char_ngram),
             min_df=min_df,
             max_df=max_df,
             max_features_word=max_features_word,
@@ -223,8 +229,8 @@ def main() -> None:
     pipe = linear_pipeline.build_unified_pipeline(
         cfg=cfg,
         doc_cfg=doc_cfg,
-        word_ngram_range=tuple(best_params["word_ngram"]),
-        char_ngram_range=tuple(best_params["char_ngram"]),
+        word_ngram_range=_parse_pair(best_params["word_ngram"]),
+        char_ngram_range=_parse_pair(best_params["char_ngram"]),
         min_df=int(best_params["min_df"]),
         max_df=float(best_params["max_df"]),
         max_features_word=int(best_params["max_features_word"]),

@@ -20,9 +20,20 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-import torch
-from torch.utils.data import DataLoader, Dataset
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+# NOTE: Transformer path is deprecated for this repo's final submission.
+# Keep the module import-safe (no torch/transformers dependency) by providing
+# placeholders. Running this script will exit with an explanatory message.
+torch = None  # type: ignore
+
+
+class Dataset:  # type: ignore
+    pass
+
+
+DataLoader = object  # type: ignore
+AutoModelForSequenceClassification = object  # type: ignore
+AutoTokenizer = object  # type: ignore
 
 from config import (
     default_config,
@@ -337,8 +348,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    os.environ.setdefault("OMP_NUM_THREADS", "4")
-    main()
+    raise SystemExit(
+        "[predict_transformer] Deprecated/disabled (no transformers). Use predict_linear.py instead."
+    )
 
 
 

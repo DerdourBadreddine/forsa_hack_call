@@ -256,6 +256,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(
+        "[eval_blend_holdout] Deprecated/disabled (no transformers). Use optuna_search.py metrics instead."
+    )
 
 
