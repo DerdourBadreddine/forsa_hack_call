@@ -1,0 +1,23 @@
+{
+  "best_value_oof_macro_f1": 0.9751315489311,
+  "params": {
+    "word_ngram": "1,2",
+    "char_ngram": "3,5",
+    "min_df": 2,
+    "max_df": 0.8702792876437063,
+    "max_features_word": 80000,
+    "max_features_char": 280000,
+    "sublinear_tf": false,
+    "classifier": "linearsvc",
+    "class_balance": "none",
+    "svm_C": 0.6950542774791499
+  },
+  "resolved": {
+    "classifier": "linearsvc",
+    "class_balance": "none",
+    "clf_params": {
+      "C": 0.6950542774791499,
+      "max_iter": 12000
+    }
+  }
+}
