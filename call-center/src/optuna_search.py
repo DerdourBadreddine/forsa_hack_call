@@ -38,6 +38,7 @@ def _utc_run_id() -> str:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
 
+    p.add_argument("--team_dir", type=str, default=None, help="Drive root (Colab), e.g. /content/drive/MyDrive/FORSA_team")
     p.add_argument("--data_dir", type=str, default=None, help="Folder with train.csv/test.csv/sample_submission.csv")
     p.add_argument("--train_csv", type=str, default="train.csv")
     p.add_argument("--test_csv", type=str, default="test.csv")
@@ -84,11 +85,14 @@ def main() -> None:
     args = parse_args()
     _set_repro(int(args.seed))
 
-    data_dir = Path(args.data_dir) if args.data_dir else linear_pipeline.default_local_data_dir()
+    if args.data_dir:
+        data_dir = Path(args.data_dir)
+    else:
+        data_dir = linear_pipeline.resolve_data_dir(team_dir=args.team_dir)
     if not data_dir.exists():
         raise FileNotFoundError(f"data_dir not found: {data_dir}")
 
-    base_out = Path(args.out_dir) if args.out_dir else linear_pipeline.default_outputs_dir()
+    base_out = Path(args.out_dir) if args.out_dir else linear_pipeline.resolve_outputs_dir(team_dir=args.team_dir)
     run_id = args.run_id or _utc_run_id()
     run_dir = base_out / run_id
     run_dir.mkdir(parents=True, exist_ok=True)

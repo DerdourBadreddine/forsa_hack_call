@@ -28,6 +28,7 @@ def _utc_run_id() -> str:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
 
+    p.add_argument("--team_dir", type=str, default=None, help="Drive root (Colab), e.g. /content/drive/MyDrive/FORSA_team")
     p.add_argument("--data_dir", type=str, default=None)
     p.add_argument("--out_dir", type=str, default=None)
     p.add_argument("--run_id", type=str, default=None)
@@ -68,8 +69,8 @@ def main() -> None:
     args = parse_args()
     cfg = default_config()
 
-    data_dir = Path(args.data_dir) if args.data_dir else linear_pipeline.default_local_data_dir()
-    out_dir = Path(args.out_dir) if args.out_dir else linear_pipeline.default_outputs_dir()
+    data_dir = Path(args.data_dir) if args.data_dir else linear_pipeline.resolve_data_dir(team_dir=args.team_dir)
+    out_dir = Path(args.out_dir) if args.out_dir else linear_pipeline.resolve_outputs_dir(team_dir=args.team_dir)
     run_id = args.run_id or _utc_run_id()
     run_dir = out_dir / run_id
     run_dir.mkdir(parents=True, exist_ok=True)

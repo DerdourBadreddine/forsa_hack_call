@@ -22,8 +22,11 @@ from config import default_config
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
+    p.add_argument("--team_dir", type=str, default=None, help="Drive root (Colab), e.g. /content/drive/MyDrive/FORSA_team")
     p.add_argument("--data_dir", type=str, default=None, help="Folder with test.csv")
     p.add_argument("--test_csv", type=str, default="test.csv")
+
+    p.add_argument("--sample_submission_csv", type=str, default="sample_submission.csv", help="Used to enforce Id ordering")
 
     p.add_argument("--run_dir", type=str, required=True, help="Run directory containing model.joblib")
 
@@ -38,7 +41,7 @@ def main() -> None:
     args = parse_args()
 
     cfg = default_config()
-    data_dir = Path(args.data_dir) if args.data_dir else linear_pipeline.default_local_data_dir()
+    data_dir = Path(args.data_dir) if args.data_dir else linear_pipeline.resolve_data_dir(team_dir=args.team_dir)
     run_dir = Path(args.run_dir)
     if not run_dir.exists():
         raise FileNotFoundError(f"run_dir not found: {run_dir}")
@@ -52,25 +55,49 @@ def main() -> None:
     except Exception as e:  # pragma: no cover
         raise RuntimeError("joblib is required (installed with scikit-learn).") from e
 
-    df_test_raw = pd.read_csv(data_dir / str(args.test_csv))
+    test_path = data_dir / str(args.test_csv)
+    df_test_raw = pd.read_csv(test_path)
     df_test_clean = linear_pipeline.preprocess_raw_df(df_test_raw, cfg)
 
-    # Stable ordering by id if present (but we keep original order for submission alignment).
-    # We'll output ids from the raw file to avoid dtype surprises.
+    # Use sample_submission to enforce exact ordering when available.
+    sample_path = data_dir / str(args.sample_submission_csv)
+    df_sample = pd.read_csv(sample_path) if sample_path.exists() else None
+
+    # Determine test ids
     if "Id" in df_test_raw.columns:
-        out_ids = df_test_raw["Id"]
+        test_ids = df_test_raw["Id"]
     elif "id" in df_test_raw.columns:
-        out_ids = df_test_raw["id"]
+        test_ids = df_test_raw["id"]
     elif cfg.id_col in df_test_clean.columns:
-        out_ids = df_test_clean[cfg.id_col]
+        test_ids = df_test_clean[cfg.id_col]
     else:
-        raise ValueError("Could not find an id column in test.csv")
+        raise ValueError(f"Could not find an id column in {test_path}")
 
     model = joblib.load(model_path)
     pred = model.predict(df_test_clean)
     pred = np.asarray(pred).reshape(-1).astype(int)
 
-    out = pd.DataFrame({str(args.id_col): out_ids, str(args.prediction_col): pred})
+    pred_df = pd.DataFrame({"Id": test_ids.astype("string"), "Prediction": pred})
+    if df_sample is not None:
+        # Accept common variants but enforce final output columns.
+        if df_sample.columns.tolist() == ["Id", "Prediction"]:
+            out = df_sample[["Id"]].merge(pred_df, on="Id", how="left")
+        elif df_sample.columns.tolist() == ["id", "class_int"]:
+            tmp = df_sample.rename(columns={"id": "Id"})[["Id"]]
+            out = tmp.merge(pred_df, on="Id", how="left")
+        else:
+            tmp = df_sample[[df_sample.columns[0]]].rename(columns={df_sample.columns[0]: "Id"})
+            out = tmp.merge(pred_df, on="Id", how="left")
+
+        if out["Prediction"].isna().any():
+            missing = int(out["Prediction"].isna().sum())
+            raise RuntimeError(f"Failed to align predictions to sample_submission ids; missing={missing}")
+        out["Prediction"] = out["Prediction"].astype(int)
+    else:
+        out = pred_df.copy()
+
+    # Final column names required by the hackathon: Id,Prediction
+    out = out.rename(columns={"Id": str(args.id_col), "Prediction": str(args.prediction_col)})
 
     out_path = Path(args.out_path) if args.out_path else (run_dir / "submission.csv")
     out.to_csv(out_path, index=False)

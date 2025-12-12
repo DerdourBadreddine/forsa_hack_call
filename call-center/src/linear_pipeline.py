@@ -31,7 +31,13 @@ from sklearn.linear_model import LogisticRegression, SGDClassifier
 from sklearn.svm import LinearSVC
 
 import preprocess
-from config import CallCenterConfig, default_config, guess_repo_root
+from config import (
+    CallCenterConfig,
+    default_config,
+    guess_repo_root,
+    guess_team_dir,
+    resolve_callcenter_data_dir,
+)
 
 
 _TOKEN_SANITIZE_RE = re.compile(r"\s+")
@@ -318,8 +324,48 @@ def default_local_data_dir() -> Path:
     return guess_repo_root() / "data" / "forsa-2025-call-center"
 
 
+def resolve_data_dir(*, team_dir: str | Path | None = None) -> Path:
+    """Resolve where train/test/sample_submission live.
+
+    Priority:
+    1) Explicit team_dir/<repo-style> folder: <team_dir>/data/forsa-2025-call-center
+    2) Explicit team_dir with callcenter variants via config.resolve_callcenter_data_dir
+    3) Local repo folder: data/forsa-2025-call-center
+    """
+    if team_dir is None:
+        td = guess_team_dir()
+    else:
+        td = Path(team_dir)
+
+    if td is not None:
+        repo_style = td / "data" / "forsa-2025-call-center"
+        if repo_style.exists():
+            return repo_style
+
+        candidate = resolve_callcenter_data_dir(td)
+        if candidate.exists():
+            return candidate
+
+    return default_local_data_dir()
+
+
 def default_outputs_dir() -> Path:
     return guess_repo_root() / "outputs" / "callcenter" / "linear"
+
+
+def resolve_outputs_dir(*, team_dir: str | Path | None = None) -> Path:
+    """Resolve outputs base dir.
+
+    - In Colab/Drive: <team_dir>/outputs/callcenter/linear
+    - Locally: outputs/callcenter/linear
+    """
+    if team_dir is None:
+        td = guess_team_dir()
+    else:
+        td = Path(team_dir)
+    if td is not None and td.exists():
+        return td / "outputs" / "callcenter" / "linear"
+    return default_outputs_dir()
 
 
 def write_json(path: Path, obj: dict[str, Any]) -> None:
