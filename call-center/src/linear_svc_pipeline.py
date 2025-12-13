@@ -167,9 +167,8 @@ def build_pipeline(
             penalty=penalty,
             l1_ratio=float(clf_params.get("l1_ratio", 0.1)) if penalty == "elasticnet" else None,
             solver="saga",
-            multi_class="auto",
             max_iter=int(clf_params.get("max_iter", 4000)),
-            n_jobs=int(clf_params.get("n_jobs", -1)),
+            n_jobs=int(clf_params.get("n_jobs", 1)),
             random_state=int(seed),
         )
     elif clf_name == "sgd":

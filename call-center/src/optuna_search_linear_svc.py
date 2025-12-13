@@ -63,6 +63,13 @@ def parse_args() -> argparse.Namespace:
     # optuna
     p.add_argument("--study_name", type=str, default="callcenter_linear_svc")
     p.add_argument("--sampler", type=str, default="tpe", choices=["tpe", "random"])
+    p.add_argument(
+        "--storage",
+        type=str,
+        default="sqlite",
+        choices=["sqlite", "none"],
+        help="Optuna storage backend for resume (sqlite recommended).",
+    )
 
     return p.parse_args()
 
@@ -85,111 +92,36 @@ def _load_train(data_dir: Path, train_csv: str) -> tuple[pd.DataFrame, np.ndarra
     return df_clean, y
 
 
-def main() -> None:
-    args = parse_args()
-    _set_repro(int(args.seed))
+def _storage_url(storage_mode: str, run_dir: Path) -> str | None:
+    mode = str(storage_mode).lower().strip()
+    if mode in {"none", "null", ""}:
+        return None
+    if mode != "sqlite":
+        raise ValueError(f"Unsupported storage mode: {storage_mode}")
 
-    data_dir = Path(args.data_dir) if args.data_dir else linear_pipeline.default_local_data_dir()
-    if not data_dir.exists():
-        raise FileNotFoundError(f"data_dir not found: {data_dir}")
+    db_path = (run_dir / "study.db").resolve()
+    # SQLAlchemy / Optuna expects 3 slashes, and Windows paths should use forward slashes.
+    return f"sqlite:///{db_path.as_posix()}"
 
-    base_out = Path(args.out_dir) if args.out_dir else linear_pipeline.default_outputs_dir()
-    run_id = args.run_id or _utc_run_id()
-    run_dir = base_out / run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
 
-    # Optional dependency
-    try:
-        import optuna  # type: ignore
-    except Exception as e:  # pragma: no cover
-        raise RuntimeError("Optuna is not installed. Install with: pip install optuna") from e
-
-    cfg = default_config()
-    base_spec = features.build_feature_spec(cfg)
-    spec = linear_svc_pipeline.LinearSvcFeatureSpec(
-        text_col=str(base_spec["text_col"]),
-        cat_cols=tuple(base_spec["cat_cols"]),
-        num_cols=tuple(base_spec["num_cols"]),
-    )
-
-    df_clean, y = _load_train(data_dir, args.train_csv)
-    labels = sorted(np.unique(y).tolist())
-
-    def objective(trial: "optuna.Trial") -> float:
-        word_ngram = trial.suggest_categorical("word_ngram", ["1,1", "1,2"])
-        char_ngram = trial.suggest_categorical("char_ngram", ["3,5", "4,6"])
-
-        min_df = trial.suggest_int("min_df", 1, 8)
-        max_df = trial.suggest_float("max_df", 0.85, 0.98)
-
-        max_features_word = int(trial.suggest_int("max_features_word", 80_000, 200_000, step=10_000))
-        max_features_char = int(trial.suggest_int("max_features_char", 150_000, 300_000, step=10_000))
-
-        sublinear_tf = trial.suggest_categorical("sublinear_tf", [True, False])
-
-        clf_choice = trial.suggest_categorical("classifier", ["logreg", "linearsvc", "sgd"])
-        class_balance = trial.suggest_categorical("class_balance", ["none", "balanced", "custom_sqrt"])
-
-        clf_params: dict[str, Any] = {}
-        if clf_choice == "logreg":
-            clf_params["C"] = trial.suggest_float("logreg_C", 0.2, 12.0, log=True)
-            clf_params["penalty"] = trial.suggest_categorical("logreg_penalty", ["l2", "elasticnet"])
-            if clf_params["penalty"] == "elasticnet":
-                clf_params["l1_ratio"] = trial.suggest_float("logreg_l1_ratio", 0.05, 0.5)
-            clf_params["max_iter"] = 4000
-            clf_params["n_jobs"] = -1
-        elif clf_choice == "linearsvc":
-            clf_params["C"] = trial.suggest_float("svm_C", 0.2, 12.0, log=True)
-            clf_params["max_iter"] = 12000
-        else:
-            clf_params["alpha"] = trial.suggest_float("sgd_alpha", 1e-6, 1e-4, log=True)
-            clf_params["penalty"] = trial.suggest_categorical("sgd_penalty", ["l2", "elasticnet"])
-            if clf_params["penalty"] == "elasticnet":
-                clf_params["l1_ratio"] = trial.suggest_float("sgd_l1_ratio", 0.05, 0.3)
-            clf_params["loss"] = trial.suggest_categorical("sgd_loss", ["log_loss", "hinge"])
-            clf_params["max_iter"] = 2000
-            clf_params["tol"] = 1e-3
-
-        pipe = linear_svc_pipeline.build_pipeline(
-            cfg=cfg,
-            spec=spec,
-            word_ngram_range=_parse_pair(word_ngram),
-            char_ngram_range=_parse_pair(char_ngram),
-            min_df=min_df,
-            max_df=max_df,
-            max_features_word=max_features_word,
-            max_features_char=max_features_char,
-            sublinear_tf=sublinear_tf,
-            classifier=clf_choice,
-            clf_params=clf_params,
-            seed=int(args.seed),
-        )
-
-        cv = linear_svc_pipeline.cv_score_macro_f1(
-            cfg=cfg,
-            df_clean=df_clean,
-            y=y,
-            pipeline=pipe,
-            n_splits=int(args.folds),
-            seed=int(args.seed),
-            class_balance=class_balance,
-        )
-        trial.set_user_attr("cv", cv)
-        return float(cv["oof_macro_f1"])
-
-    if args.sampler == "random":
-        sampler = optuna.samplers.RandomSampler(seed=int(args.seed))
-    else:
-        sampler = optuna.samplers.TPESampler(seed=int(args.seed))
-
-    study = optuna.create_study(direction="maximize", study_name=str(args.study_name), sampler=sampler)
-    study.optimize(objective, n_trials=int(args.trials), timeout=int(args.timeout) if args.timeout else None)
-
+def _resolve_and_save_best(
+    *,
+    cfg: Any,
+    spec: linear_svc_pipeline.LinearSvcFeatureSpec,
+    df_clean: pd.DataFrame,
+    y: np.ndarray,
+    labels: list[int],
+    run_dir: Path,
+    run_id: str,
+    data_dir: Path,
+    folds: int,
+    seed: int,
+    study: Any,
+) -> None:
     best = study.best_trial
     best_params = dict(best.params)
     best_cv = dict(best.user_attrs.get("cv") or {})
 
-    # Rebuild best pipeline
     clf_choice = best_params["classifier"]
     class_balance = best_params["class_balance"]
 
@@ -199,7 +131,8 @@ def main() -> None:
             "C": float(best_params["logreg_C"]),
             "penalty": str(best_params["logreg_penalty"]),
             "max_iter": 4000,
-            "n_jobs": -1,
+            # Keep interrupts responsive on Colab; can be increased if desired.
+            "n_jobs": 1,
         }
         if clf_params["penalty"] == "elasticnet":
             clf_params["l1_ratio"] = float(best_params["logreg_l1_ratio"])
@@ -228,7 +161,7 @@ def main() -> None:
         sublinear_tf=bool(best_params["sublinear_tf"]),
         classifier=clf_choice,
         clf_params=clf_params,
-        seed=int(args.seed),
+        seed=int(seed),
     )
 
     sw = linear_svc_pipeline.compute_sample_weight(y, mode=class_balance)
@@ -240,7 +173,9 @@ def main() -> None:
     except Exception as e:  # pragma: no cover
         raise RuntimeError("joblib is required (installed with scikit-learn).") from e
 
-    joblib.dump(pipe, run_dir / "model.joblib", compress=3)
+    tmp_path = run_dir / "model.joblib.tmp"
+    joblib.dump(pipe, tmp_path, compress=3)
+    tmp_path.replace(run_dir / "model.joblib")
 
     linear_pipeline.write_json(
         run_dir / "best_params.json",
@@ -288,15 +223,195 @@ def main() -> None:
         {
             "run_id": run_id,
             "utc_time": datetime.now(timezone.utc).isoformat(),
-            "seed": int(args.seed),
-            "folds": int(args.folds),
+            "seed": int(seed),
+            "folds": int(folds),
             "data_dir": str(data_dir),
             "cfg": asdict(cfg),
         },
     )
 
+
+def main() -> None:
+    args = parse_args()
+    _set_repro(int(args.seed))
+
+    data_dir = Path(args.data_dir) if args.data_dir else linear_pipeline.default_local_data_dir()
+    if not data_dir.exists():
+        raise FileNotFoundError(f"data_dir not found: {data_dir}")
+
+    base_out = Path(args.out_dir) if args.out_dir else linear_pipeline.default_outputs_dir()
+    run_id = args.run_id or _utc_run_id()
+    run_dir = base_out / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    # Optional dependency
+    try:
+        import optuna  # type: ignore
+    except Exception as e:  # pragma: no cover
+        raise RuntimeError("Optuna is not installed. Install with: pip install optuna") from e
+
+    cfg = default_config()
+    base_spec = features.build_feature_spec(cfg)
+    spec = linear_svc_pipeline.LinearSvcFeatureSpec(
+        text_col=str(base_spec["text_col"]),
+        cat_cols=tuple(base_spec["cat_cols"]),
+        num_cols=tuple(base_spec["num_cols"]),
+    )
+
+    df_clean, y = _load_train(data_dir, args.train_csv)
+    labels = sorted(np.unique(y).tolist())
+
+    storage_url = _storage_url(args.storage, run_dir)
+
+    def objective(trial: "optuna.Trial") -> float:
+        word_ngram = trial.suggest_categorical("word_ngram", ["1,1", "1,2"])
+        char_ngram = trial.suggest_categorical("char_ngram", ["3,5", "4,6"])
+
+        min_df = trial.suggest_int("min_df", 1, 8)
+        max_df = trial.suggest_float("max_df", 0.85, 0.98)
+
+        max_features_word = int(trial.suggest_int("max_features_word", 80_000, 200_000, step=10_000))
+        max_features_char = int(trial.suggest_int("max_features_char", 150_000, 300_000, step=10_000))
+
+        sublinear_tf = trial.suggest_categorical("sublinear_tf", [True, False])
+
+        clf_choice = trial.suggest_categorical("classifier", ["logreg", "linearsvc", "sgd"])
+        class_balance = trial.suggest_categorical("class_balance", ["none", "balanced", "custom_sqrt"])
+
+        clf_params: dict[str, Any] = {}
+        if clf_choice == "logreg":
+            clf_params["C"] = trial.suggest_float("logreg_C", 0.2, 12.0, log=True)
+            clf_params["penalty"] = trial.suggest_categorical("logreg_penalty", ["l2", "elasticnet"])
+            if clf_params["penalty"] == "elasticnet":
+                clf_params["l1_ratio"] = trial.suggest_float("logreg_l1_ratio", 0.05, 0.5)
+            clf_params["max_iter"] = 4000
+            # Keep interrupts responsive on Colab; can be increased if desired.
+            clf_params["n_jobs"] = 1
+        elif clf_choice == "linearsvc":
+            clf_params["C"] = trial.suggest_float("svm_C", 0.2, 12.0, log=True)
+            clf_params["max_iter"] = 12000
+        else:
+            clf_params["alpha"] = trial.suggest_float("sgd_alpha", 1e-6, 1e-4, log=True)
+            clf_params["penalty"] = trial.suggest_categorical("sgd_penalty", ["l2", "elasticnet"])
+            if clf_params["penalty"] == "elasticnet":
+                clf_params["l1_ratio"] = trial.suggest_float("sgd_l1_ratio", 0.05, 0.3)
+            clf_params["loss"] = trial.suggest_categorical("sgd_loss", ["log_loss", "hinge"])
+            clf_params["max_iter"] = 2000
+            clf_params["tol"] = 1e-3
+
+        pipe = linear_svc_pipeline.build_pipeline(
+            cfg=cfg,
+            spec=spec,
+            word_ngram_range=_parse_pair(word_ngram),
+            char_ngram_range=_parse_pair(char_ngram),
+            min_df=min_df,
+            max_df=max_df,
+            max_features_word=max_features_word,
+            max_features_char=max_features_char,
+            sublinear_tf=sublinear_tf,
+            classifier=clf_choice,
+            clf_params=clf_params,
+            seed=int(args.seed),
+        )
+
+        cv = linear_svc_pipeline.cv_score_macro_f1(
+            cfg=cfg,
+            df_clean=df_clean,
+            y=y,
+            pipeline=pipe,
+            n_splits=int(args.folds),
+            seed=int(args.seed),
+            class_balance=class_balance,
+        )
+
+        # Keep sqlite storage smaller by excluding the full classification_report.
+        cv_compact = {
+            "labels": cv.get("labels"),
+            "folds": cv.get("folds"),
+            "macro_f1_mean": cv.get("macro_f1_mean"),
+            "macro_f1_std": cv.get("macro_f1_std"),
+            "oof_macro_f1": cv.get("oof_macro_f1"),
+            "per_class_f1": cv.get("per_class_f1"),
+            "sanity": cv.get("sanity"),
+        }
+        trial.set_user_attr("cv", cv_compact)
+        return float(cv["oof_macro_f1"])
+
+    if args.sampler == "random":
+        sampler = optuna.samplers.RandomSampler(seed=int(args.seed))
+    else:
+        sampler = optuna.samplers.TPESampler(seed=int(args.seed))
+
+    study = optuna.create_study(
+        direction="maximize",
+        study_name=str(args.study_name),
+        sampler=sampler,
+        storage=storage_url,
+        load_if_exists=bool(storage_url),
+    )
+
+    last_checkpointed_best_number: int | None = None
+
+    def _checkpoint_callback(study: "optuna.Study", trial: "optuna.Trial") -> None:  # noqa: ARG001
+        nonlocal last_checkpointed_best_number
+        try:
+            best_trial = study.best_trial
+        except Exception:
+            return
+
+        if last_checkpointed_best_number == int(best_trial.number):
+            return
+
+        try:
+            _resolve_and_save_best(
+                cfg=cfg,
+                spec=spec,
+                df_clean=df_clean,
+                y=y,
+                labels=labels,
+                run_dir=run_dir,
+                run_id=run_id,
+                data_dir=data_dir,
+                folds=int(args.folds),
+                seed=int(args.seed),
+                study=study,
+            )
+            last_checkpointed_best_number = int(best_trial.number)
+            print(
+                f"[optuna_search_linear_svc] Checkpointed best trial #{best_trial.number} "
+                f"(OOF Macro-F1={float(best_trial.value):.6f})"
+            )
+        except Exception as e:
+            print(f"[optuna_search_linear_svc] WARNING: checkpoint failed: {e}")
+
+    try:
+        study.optimize(
+            objective,
+            n_trials=int(args.trials),
+            timeout=int(args.timeout) if args.timeout else None,
+            callbacks=[_checkpoint_callback],
+            gc_after_trial=True,
+        )
+    except KeyboardInterrupt:
+        print("[optuna_search_linear_svc] Interrupted. Saving best checkpoint...")
+
+    # Always try to save best at the end (or after interrupt).
+    _resolve_and_save_best(
+        cfg=cfg,
+        spec=spec,
+        df_clean=df_clean,
+        y=y,
+        labels=labels,
+        run_dir=run_dir,
+        run_id=run_id,
+        data_dir=data_dir,
+        folds=int(args.folds),
+        seed=int(args.seed),
+        study=study,
+    )
+
     print(f"[optuna_search_linear_svc] Saved run_dir: {run_dir}")
-    print(f"[optuna_search_linear_svc] Best OOF Macro-F1: {float(best.value):.6f}")
+    print(f"[optuna_search_linear_svc] Best OOF Macro-F1: {float(study.best_trial.value):.6f}")
 
 
 if __name__ == "__main__":
