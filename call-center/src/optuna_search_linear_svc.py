@@ -31,10 +31,10 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-import features
-import linear_pipeline
-import linear_svc_pipeline
-from config import default_config
+from . import features
+from . import linear_pipeline
+from . import linear_svc_pipeline
+from .config import default_config
 
 
 def _utc_run_id() -> str:

@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from config import CallCenterConfig
+from .config import CallCenterConfig
 
 
 class SchemaError(ValueError):

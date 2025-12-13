@@ -25,7 +25,7 @@ from typing import Any, Iterable
 import numpy as np
 import pandas as pd
 
-from config import CallCenterConfig
+from .config import CallCenterConfig
 
 # --- Engineered feature names (explicit) ---
 TIME_FEATURES: tuple[str, ...] = (

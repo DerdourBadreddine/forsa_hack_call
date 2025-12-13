@@ -20,7 +20,7 @@ from typing import Iterable
 
 import pandas as pd
 
-from config import CallCenterConfig
+from .config import CallCenterConfig
 
 UNK = "UNK"
 

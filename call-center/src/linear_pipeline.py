@@ -30,8 +30,8 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.linear_model import LogisticRegression, SGDClassifier
 from sklearn.svm import LinearSVC
 
-import preprocess
-from config import (
+from . import preprocess
+from .config import (
     CallCenterConfig,
     default_config,
     guess_repo_root,

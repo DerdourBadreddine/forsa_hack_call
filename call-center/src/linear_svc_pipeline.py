@@ -26,8 +26,8 @@ from sklearn.preprocessing import MaxAbsScaler, OneHotEncoder
 from sklearn.svm import LinearSVC
 from sklearn.utils.class_weight import compute_class_weight
 
-import features
-from config import CallCenterConfig
+from . import features
+from .config import CallCenterConfig
 
 
 @dataclass(frozen=True)
